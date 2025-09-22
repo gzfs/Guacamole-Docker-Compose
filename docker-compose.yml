@@ -1,0 +1,109 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    platform: linux/amd64
+    container_name: guacamole-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-guacamole_db}
+      POSTGRES_USER: ${POSTGRES_USER:-guacamole_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-guacamole_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    networks:
+      - guacamole-network
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-guacamole_user} -d ${POSTGRES_DB:-guacamole_db}",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Guacamole Server (guacd)
+  guacd:
+    image: guacamole/guacd:1.5.3
+    platform: linux/amd64
+    container_name: guacamole-guacd
+    volumes:
+      - ./drive:/drive:rw
+      - ./record:/record:rw
+    environment:
+      GUACD_LOG_LEVEL: ${GUACD_LOG_LEVEL:-info}
+    networks:
+      - guacamole-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "netstat -an | grep :4822 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Guacamole Web Application
+  guacamole:
+    image: guacamole/guacamole:1.5.3
+    platform: linux/amd64
+    container_name: guacamole-web
+    environment:
+      GUACD_HOSTNAME: guacd
+      GUACD_PORT: 4822
+      POSTGRESQL_HOSTNAME: postgres
+      POSTGRESQL_PORT: 5432
+      POSTGRESQL_DATABASE: guacamole_db
+      POSTGRESQL_USER: guacamole_user
+      POSTGRESQL_PASSWORD: guacamole_password
+      GUACD_LOG_LEVEL: ${GUACD_LOG_LEVEL:-info}
+      GUACAMOLE_HOME: /opt/guacamole
+    volumes:
+      - ./extensions:/opt/guacamole/extensions:ro
+      - ./guacamole-properties/guacamole.properties:/opt/guacamole/guacamole.properties:ro
+      - ./lib:/opt/guacamole/lib:ro
+      - ./drive:/drive:rw
+      - ./record:/record:rw
+    ports:
+      - "${GUACAMOLE_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      guacd:
+        condition: service_healthy
+    networks:
+      - guacamole-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/guacamole/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  nginx:
+    image: nginx:alpine
+    platform: linux/amd64
+    container_name: guacamole-nginx
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - guacamole
+    networks:
+      - guacamole-network
+    restart: unless-stopped
+    profiles:
+      - nginx
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  guacamole-network:
+    driver: bridge
