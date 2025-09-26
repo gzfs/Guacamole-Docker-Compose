@@ -10,7 +10,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-guacamole_password}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+      - ./init:/docker-entrypoint-initdb.d:ro
     networks:
       - guacamole-network
     restart: unless-stopped
@@ -22,11 +22,13 @@ services:
         ]
       interval: 30s
       timeout: 10s
-      retries: 5
+      retries: 5    
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   # Guacamole Server (guacd)
   guacd:
-    image: guacamole/guacd:1.5.3
+    image: guacamole/guacd:1.6.0
     platform: linux/amd64
     container_name: guacamole-guacd
     volumes:
@@ -42,6 +44,8 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   # Guacamole Web Application
   guacamole:
@@ -49,6 +53,7 @@ services:
     platform: linux/amd64
     container_name: guacamole-web
     environment:
+      JAVA_OPTS: -XX:-UseContainerSupport
       GUACD_HOSTNAME: guacd
       GUACD_PORT: 4822
       POSTGRESQL_HOSTNAME: postgres
@@ -75,7 +80,7 @@ services:
       - guacamole-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/guacamole/"]
+      test: ["CMD", "curl", "-f", "http://localhost:8888/guacamole/"]
       interval: 30s
       timeout: 10s
       retries: 5
